@@ -1,0 +1,21 @@
+{
+  "name": "double-line-magic-formation",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "《双线魔阵》竖屏双路即时卡牌塔防原型",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,95 @@
+:root {
+  color-scheme: dark;
+  --bg: #05070c;
+  --app-bg: radial-gradient(120% 70% at 50% 0%, #101728 0%, #080b12 55%, #05070c 100%);
+  --panel: #0f141e;
+  --panel-2: #161d2b;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #e8edf7;
+  --muted: #8b97ad;
+  --magic: #a78bfa;
+  --magic-2: #ff6b9a;
+  --left: #5b8def;
+  --right: #ff6b9a;
+  --ok: #4fd1c5;
+  --danger: #ff6b6b;
+  --gold: #ffd166;
+  --radius: 14px;
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  background: radial-gradient(circle at 50% 0%, #121a2b, #05070c 62%);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--magic);
+  outline-offset: 2px;
+}
+
+.phone {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--app-bg);
+}
+
+@media (min-width: 560px) {
+  body {
+    padding: 24px;
+  }
+
+  .phone {
+    height: min(920px, calc(100dvh - 48px));
+    border: 1px solid var(--line-strong);
+    border-radius: 32px;
+    box-shadow:
+      0 40px 90px rgba(0, 0, 0, 0.65),
+      0 0 0 8px #0a0e16,
+      0 0 0 9px rgba(255, 255, 255, 0.05);
+  }
+}
+
+.app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
+}

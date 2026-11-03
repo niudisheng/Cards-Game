@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#080b12" />
+    <meta name="description" content="《双线魔阵》竖屏双路即时卡牌塔防原型" />
+    <title>双线魔阵 · 原型</title>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="app" id="app">
+        <header class="topbar">
+          <div class="topbar__row">
+            <span class="chip" id="phase-chip">准备阶段</span>
+            <span class="clock" id="clock">0:10</span>
+            <span class="topbar__spacer"></span>
+            <button class="btn-help" id="btn-help" type="button" aria-haspopup="dialog">? 玩法</button>
+            <button class="icon-btn" id="btn-debug" type="button" aria-pressed="false">🐞</button>
+          </div>
+          <p class="preview" id="preview">路线预告加载中…</p>
+          <div class="boss" id="boss" hidden>
+            <div class="boss__row">
+              <span class="boss__name">Boss 巨像</span>
+              <span class="boss__hp" id="boss-hp"></span>
+            </div>
+            <div class="boss__track"><i class="boss__fill" id="boss-fill"></i></div>
+          </div>
+        </header>
+
+        <main class="stage">
+          <canvas id="battlefield" aria-label="战场：左右两路各三格"></canvas>
+          <div class="pause-veil" id="pause-veil" hidden>
+            <span class="pause-veil__label">已暂停</span>
+            <button class="btn" id="btn-resume" type="button">继续</button>
+          </div>
+        </main>
+
+        <section class="dock">
+          <button class="dock-note" id="btn-help-note" type="button">
+            敌人从上方两路入口进入 · 点此看操作说明
+          </button>
+          <div class="barriers" id="barriers"></div>
+
+          <div class="mana">
+            <div class="mana__row">
+              <span class="mana__label">魔力</span>
+              <span class="mana__value" id="mana-value">5 / 10</span>
+            </div>
+            <div class="mana__track" role="progressbar" aria-label="魔力" aria-valuemin="0" aria-valuemax="10" aria-valuenow="5">
+              <i class="mana__fill" id="mana-fill"></i>
+            </div>
+            <div class="mana__row mana__row--sub">
+              <span>+0.6 / 秒</span>
+              <span id="pile-info">抽牌堆 8 · 弃牌堆 0</span>
+            </div>
+          </div>
+
+          <div class="select-hint" id="select-hint" hidden>
+            <span id="select-hint-text"></span>
+            <button class="select-hint__cancel" id="select-cancel" type="button">取消</button>
+          </div>
+
+          <div class="hand" id="hand" aria-label="手牌"></div>
+
+          <div class="controls">
+            <button class="btn" id="btn-pause" type="button">暂停</button>
+            <button class="btn btn--primary" id="btn-restart" type="button">重开</button>
+          </div>
+        </section>
+
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+        <aside class="debug" id="debug" hidden>
+          <div class="debug__head">
+            <strong>调试</strong>
+            <button class="icon-btn" id="btn-debug-close" type="button" aria-label="关闭调试">✕</button>
+          </div>
+          <pre id="debug-body"></pre>
+        </aside>
+
+        <div class="sheet" id="sheet" hidden>
+          <div class="sheet__backdrop" data-close="sheet"></div>
+          <div class="sheet__panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+            <div class="sheet__head">
+              <span class="sheet__emoji" id="sheet-emoji">🛡️</span>
+              <div class="sheet__titles">
+                <h2 id="sheet-title">盾卫</h2>
+                <p class="sheet__meta" id="sheet-meta"></p>
+              </div>
+              <button class="icon-btn" type="button" data-close="sheet" aria-label="关闭">✕</button>
+            </div>
+            <p class="sheet__desc" id="sheet-desc"></p>
+            <dl class="sheet__stats" id="sheet-stats"></dl>
+            <p class="sheet__hint">点击卡牌选中，再点战场空格部署；长按卡牌可随时查看数值。</p>
+          </div>
+        </div>
+      </div>
+
+        <div class="sheet" id="help" hidden>
+          <div class="sheet__backdrop" data-close="help"></div>
+          <div
+            class="sheet__panel sheet__panel--help"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="help-title"
+            tabindex="-1"
+          >
+            <div class="help__scroll">
+              <div class="sheet__head">
+              <div class="sheet__titles">
+                <h2 id="help-title">怎么玩《双线魔阵》</h2>
+                <p class="sheet__meta">3—5 分钟一局 · 同时守住两条路线</p>
+              </div>
+              <button class="icon-btn" type="button" data-close="help" aria-label="关闭玩法说明">✕</button>
+            </div>
+
+            <div class="help__diagram" aria-hidden="true">
+              <div class="help__lane">
+                <span class="help__lane-name">左路</span>
+                <span class="help__gate">敌军入口</span>
+                <span class="help__arrow">↓</span>
+                <span class="help__slots"><i></i><i></i><i></i></span>
+                <span class="help__core">核心 + 屏障</span>
+              </div>
+              <div class="help__lane help__lane--right">
+                <span class="help__lane-name">右路</span>
+                <span class="help__gate">敌军入口</span>
+                <span class="help__arrow">↓</span>
+                <span class="help__slots"><i></i><i></i><i></i></span>
+                <span class="help__core">核心 + 屏障</span>
+              </div>
+            </div>
+
+            <ol class="help__steps">
+              <li>
+                <b>敌人从上方两路进入</b>
+                <span>每条路顶部都有一个红色「敌军入口」，敌人沿虚线向下推进，终点是底部核心。</span>
+              </li>
+              <li>
+                <b>点卡牌，再点空格部署</b>
+                <span>点击手牌选中，再点任意一条路线上的空格。前排先接敌，后排更安全但离核心更近；每个空格只能放 1 个单位。</span>
+              </li>
+              <li>
+                <b>魔力会自己恢复，手牌不会</b>
+                <span>出牌消耗魔力，魔力每秒回复 0.6。手牌每 3.5 秒补 1 张，但满 4 张就停止抽牌——等待有收益，也有代价。</span>
+              </li>
+              <li>
+                <b>每路只有 1 次紧急屏障</b>
+                <span>漏怪会清空该路敌人并震碎屏障；同一路再漏一次，就直接失败。</span>
+              </li>
+            </ol>
+
+              <p class="help__goal">目标：守住 3 波进攻，击败最后出现的 Boss。</p>
+              <p class="help__note">长按卡牌看数值；Boss 波前有 15 秒预告。单位会自动攻击，你只负责放牌和放法术。</p>
+            </div>
+            <div class="help__footer">
+              <button class="btn btn--primary help__ok" type="button" data-close="help">知道了</button>
+            </div>
+          </div>
+        </div>
+      <div class="sheet" id="result" hidden>
+        <div class="sheet__backdrop"></div>
+        <div class="sheet__panel result" role="dialog" aria-modal="true" aria-labelledby="result-title">
+          <p class="result__kicker" id="result-kicker">战斗结束</p>
+          <h2 class="result__title" id="result-title">胜利</h2>
+          <p class="result__reason" id="result-reason"></p>
+          <dl class="result__stats" id="result-stats"></dl>
+          <button class="btn btn--primary result__again" id="btn-again" type="button">再来一局</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
