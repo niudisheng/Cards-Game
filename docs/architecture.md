@@ -77,7 +77,7 @@ Cards-Game/
 
 - 输入层只产生语义化指令：`deployCard(state, uid, lane, row)`、`castCard(state, uid, target)`、`pause()`、`restart()`；不直接改状态。
 - `main.ts` 把点击（`pointerdown`）换算为 `cellAt(layout, x, y)`，再交给 `deployCard` / `castCard`；Canvas 不保存玩法状态。
-- 渲染层每帧从 `BattleState` 读，不缓存权威数据；动画/飘字属于纯表现，放在 `ui/render` 内部，不进 sim。
+- 渲染层每帧从 `BattleState` 读，不缓存权威数据；伤害飘字由 sim 以轻量 `Floater` 事件写入（可被单测断言），绘制与渐隐由 `ui/render` 消费。
 - 调试面板直接读状态树，不做额外埋点。
 
 ## 4. 运行模型
@@ -100,6 +100,7 @@ interface BattleState {
   units: Unit[];
   enemies: Enemy[];
   effects: Effect[];
+  floaters: Floater[];          // 伤害/状态飘字，ttl 由 sim 递减
   spawnQueue: SpawnEvent[];     // 绝对时间轴展开后的刷怪队列
   spawnCursor: number;
   nextId: number;
@@ -111,7 +112,7 @@ interface BattleState {
 }
 ```
 
-坐标约定：敌人 `progress` 以“格”为单位，`0` 为第一排上沿、`3` 为核心上沿；出生与屏障击退均为 `0.15`（画在入口下方，避免压住入口文案）。近战停在阻挡单位所在格上方 `0.05`，射程 2 的敌人在 `0.45` 处停下；`0.15` 出生值同时保证它们不会退到入口里。
+坐标约定：敌人 `progress` 以“格”为单位，`0` 为第一排上沿、`3` 为核心上沿；出生与屏障击退均为 `0.15`（画在入口下方，避免压住入口文案）。被阻挡时近战停在单位所在格的上沿外侧 `row - 0.05`（第一排允许到 `-0.05`，画在入口与格子的缝隙里），射程 2 的敌人停在 `row - 0.45`（第一排夹到 `-0.15`），这样敌人不会和单位精灵叠在一起。
 
 `EconomyState` 已实现：魔力的自然恢复与上限截断、手牌上限时暂停抽牌计时、抽牌堆耗尽自动洗回弃牌堆、固定初始手牌（从 12 张牌堆中扣除后洗牌）。
 
@@ -132,6 +133,8 @@ interface BattleState {
 | 所有单位都阻挡敌人（忽略 `blocks` 字段） | GDD 4.2 规定“到达有单位的格子即停下攻击”，阻挡是位置规则而非卡牌特权 |
 | 敌人出生在 `progress = 0.15` | 既在入口内可见，又不会把立绘画进“敌军入口”文案里 |
 | 法术/单位效果立即结算，不做飞行物 | 原型阶段优先可读性与可测性；视觉用短 TTL 特效表达 |
+| 伤害飘字与攻击/受击闪光由 sim 产生 | 让“谁打谁、掉多少血”可被测试断言；渲染只负责颜色、上浮与渐隐，避免规则藏在 DOM/Canvas |
+| 所有攻击连线在棋子绘制后统一叠加 | 若先画线再画单位，格子的半透明底色会把线吃掉；统一叠加后远程弹道和近战连线都清晰可见 |
 
 ## 7. 扩展点（V0.2+）
 
@@ -144,7 +147,7 @@ interface BattleState {
 
 ## 8. 测试策略
 
-- 单元测试（Vitest，32 项）：`tests/economy.test.ts`（经济/抽牌/洗牌）、`tests/data.test.ts`（数据表一致性）、`tests/battle.test.ts`（部署、阻挡、伤害、法术、跳路者、自爆、Boss、屏障、胜负、临时单位）。
+- 单元测试（Vitest，34 项）：`tests/economy.test.ts`（经济/抽牌/洗牌）、`tests/data.test.ts`（数据表一致性）、`tests/battle.test.ts`（部署、阻挡、伤害、法术、跳路者、自爆、Boss、屏障、胜负、临时单位、攻击/受击飘字）。
 - 快照测试：给定种子跑固定步数，断言关键状态（用于防回归）。
 - 冒烟测试（CDP 脚本 `.tmp/play.mjs` / `.tmp/verify.mjs`）：真实 390×844 视口，点击卡牌、点格部署、施放火球、暂停、读到失败结算。
 - 平衡模拟（M4）：1000 局，胜率目标 30%—60%，平均出牌间隔 5—10s，魔力满溢 < 30%。

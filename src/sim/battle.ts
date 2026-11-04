@@ -13,7 +13,7 @@ import {
   findHandCard,
   tickEconomy,
 } from './economy';
-import { createEffect, createEnemy, createUnit, type Enemy, type Unit } from './entities';
+import { createEffect, createEnemy, createUnit, nextId, type Enemy, type FloaterTone, type Unit } from './entities';
 import type { BattleState } from './state';
 
 export type ActionResult = { ok: true } | { ok: false; reason: string };
@@ -213,6 +213,7 @@ export function stepBattle(state: BattleState, dt: number): void {
   state.stats.manaOverflow += economy.manaOverflow;
 
   updateEffects(state, dt);
+  updateFloaters(state, dt);
   updateEnemies(state, dt);
   if (state.result) return;
   updateUnits(state, dt);
@@ -242,10 +243,44 @@ function updateEffects(state: BattleState, dt: number): void {
   state.effects = state.effects.filter((effect) => effect.ttl > 0);
 }
 
+function updateFloaters(state: BattleState, dt: number): void {
+  for (const floater of state.floaters) floater.ttl -= dt;
+  state.floaters = state.floaters.filter((floater) => floater.ttl > 0);
+}
+
+/** 战斗飘字：伤害、减速、屏障等瞬时信息，位置用行号或敌人推进度表示。 */
+function pushFloater(
+  state: BattleState,
+  options: {
+    lane: Lane;
+    row?: Row;
+    progress?: number;
+    text: string;
+    tone: FloaterTone;
+    ttl?: number;
+  },
+): void {
+  if (state.floaters.length >= 40) state.floaters.shift();
+  const ttl = options.ttl ?? 0.75;
+  state.floaters.push({
+    id: nextId(state, 'f'),
+    lane: options.lane,
+    row: options.row,
+    progress: options.progress,
+    text: options.text,
+    tone: options.tone,
+    ttl,
+    maxTtl: ttl,
+  });
+}
+
 function updateEnemies(state: BattleState, dt: number): void {
   for (const enemy of [...state.enemies]) {
     if (!state.enemies.includes(enemy)) continue;
     if (state.result) return;
+
+    enemy.attackFlash = Math.max(0, enemy.attackFlash - dt);
+    enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
 
     if (enemy.slowRemaining > 0) {
       enemy.slowRemaining = Math.max(0, enemy.slowRemaining - dt);
@@ -266,6 +301,13 @@ function updateEnemies(state: BattleState, dt: number): void {
       enemy.skillCooldown = Math.max(0, enemy.skillCooldown - dt);
       if (enemy.skillCooldown === 0) {
         enemy.windupRemaining = enemy.bossSkill.windup;
+        pushFloater(state, {
+          lane: enemy.lane,
+          progress: enemy.progress,
+          text: '蓄力',
+          tone: 'notice',
+          ttl: 0.8,
+        });
         createEffect(state, {
           kind: 'burst',
           lane: enemy.lane,
@@ -285,6 +327,7 @@ function updateEnemies(state: BattleState, dt: number): void {
       const other = (enemy.lane === 0 ? 1 : 0) as Lane;
       enemy.lane = other;
       enemy.jumped = true;
+      pushFloater(state, { lane: other, row: 1, text: '换路', tone: 'notice', ttl: 0.9 });
       createEffect(state, {
         kind: 'burst',
         lane: other,
@@ -298,12 +341,17 @@ function updateEnemies(state: BattleState, dt: number): void {
     const blocker = findBlocker(state, enemy);
     const standoff = enemy.range >= 2 ? 0.45 : 0.05;
     if (blocker) {
-      const stop = Math.max(0.03, blocker.row - standoff);
+      // 停在单位所在格的上沿外侧，近战可以站在第一排入口前（负 progress）。
+      const stop = Math.max(blocker.row === 0 ? -0.15 : 0, blocker.row - standoff);
       if (enemy.progress >= stop) {
+        // 敌人出生点可能已经越过停步点（例如 0.15 的出生点遇到第一排），
+        // 贴回停步点，避免和单位精灵完全重叠。
+        enemy.progress = stop;
         enemy.attackCooldown -= dt;
         if (enemy.attackCooldown <= 0) {
           damageUnit(state, blocker, enemy.attack);
           enemy.attackCooldown = enemy.attackInterval;
+          enemy.attackFlash = 0.22;
         }
         continue;
       }
@@ -340,6 +388,9 @@ function updateUnits(state: BattleState, dt: number): void {
       }
     }
 
+    unit.attackFlash = Math.max(0, unit.attackFlash - dt);
+    unit.hitFlash = Math.max(0, unit.hitFlash - dt);
+
     if (unit.stunRemaining > 0) {
       unit.stunRemaining = Math.max(0, unit.stunRemaining - dt);
       continue;
@@ -355,9 +406,19 @@ function updateUnits(state: BattleState, dt: number): void {
 
     damageEnemy(state, target, unit.attack);
     unit.attackCooldown = effectiveAttackInterval(state, unit);
+    unit.attackFlash = 0.22;
     if (unit.slowOnHit && target.hp > 0) {
+      const wasSlowed = target.slowRemaining > 0;
       target.slowFactor = Math.min(target.slowFactor, unit.slowOnHit.factor);
       target.slowRemaining = Math.max(target.slowRemaining, unit.slowOnHit.duration);
+      if (!wasSlowed) {
+        pushFloater(state, {
+          lane: target.lane,
+          progress: target.progress,
+          text: '减速',
+          tone: 'status',
+        });
+      }
     }
   }
 }
@@ -392,6 +453,13 @@ export function enemyCell(enemy: Enemy): number {
 function damageEnemy(state: BattleState, enemy: Enemy, amount: number): void {
   if (enemy.hp <= 0 || amount <= 0) return;
   enemy.hp -= amount;
+  enemy.hitFlash = 0.16;
+  pushFloater(state, {
+    lane: enemy.lane,
+    progress: enemy.progress,
+    text: `-${Math.round(amount)}`,
+    tone: 'enemyDamage',
+  });
   if (enemy.hp <= 0) killEnemy(state, enemy);
 }
 
@@ -400,7 +468,16 @@ function killEnemy(state: BattleState, enemy: Enemy): void {
   if (index < 0) return;
   state.enemies.splice(index, 1);
   state.stats.kills += 1;
-  if (enemy.boss) state.bossDefeated = true;
+  if (enemy.boss) {
+    state.bossDefeated = true;
+    pushFloater(state, {
+      lane: enemy.lane,
+      progress: enemy.progress,
+      text: 'Boss 击破',
+      tone: 'notice',
+      ttl: 1.2,
+    });
+  }
   createEffect(state, {
     kind: 'burst',
     lane: enemy.lane,
@@ -414,6 +491,13 @@ function killEnemy(state: BattleState, enemy: Enemy): void {
 function damageUnit(state: BattleState, unit: Unit, amount: number): void {
   if (unit.hp <= 0 || amount <= 0) return;
   unit.hp -= amount;
+  unit.hitFlash = 0.16;
+  pushFloater(state, {
+    lane: unit.lane,
+    row: unit.row,
+    text: `-${Math.round(amount)}`,
+    tone: 'unitDamage',
+  });
   if (unit.hp <= 0) removeUnit(state, unit, true);
 }
 
@@ -421,6 +505,9 @@ function removeUnit(state: BattleState, unit: Unit, died: boolean): void {
   const index = state.units.indexOf(unit);
   if (index < 0) return;
   state.units.splice(index, 1);
+  if (died) {
+    pushFloater(state, { lane: unit.lane, row: unit.row, text: '阵亡', tone: 'notice' });
+  }
 
   if (died && unit.onDeath?.kind === 'explode') {
     const blast = state.enemies.filter(
@@ -462,6 +549,13 @@ function castBossSkill(state: BattleState, boss: Enemy): void {
     damageUnit(state, unit, skill.damage);
   }
   boss.skillCooldown = skill.interval;
+  pushFloater(state, {
+    lane: boss.lane,
+    progress: boss.progress,
+    text: '震慑',
+    tone: 'notice',
+    ttl: 0.9,
+  });
   createEffect(state, {
     kind: 'nova',
     lane: boss.lane,
@@ -475,6 +569,13 @@ function breach(state: BattleState, enemy: Enemy): void {
   const lane = enemy.lane;
   enemy.progress = TUNING.board.rows;
   state.stats.leaks[lane] += 1;
+  pushFloater(state, {
+    lane,
+    progress: TUNING.board.rows,
+    text: '漏怪！',
+    tone: 'notice',
+    ttl: 1.1,
+  });
 
   if (!state.barriers[lane]) {
     state.result = 'defeat';
@@ -485,6 +586,13 @@ function breach(state: BattleState, enemy: Enemy): void {
   }
 
   state.barriers[lane] = false;
+  pushFloater(state, {
+    lane,
+    progress: TUNING.board.rows,
+    text: '屏障触发',
+    tone: 'status',
+    ttl: 1.1,
+  });
   createEffect(state, {
     kind: 'barrier',
     lane,

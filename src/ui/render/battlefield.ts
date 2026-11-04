@@ -2,7 +2,7 @@ import { laneName } from '@/core/grid';
 import { LANES, ROWS, type CardId, type Lane, type Row } from '@/core/types';
 import { getCard } from '@/data/cards';
 import { getEnemy } from '@/data/enemies';
-import type { Effect, Enemy, Unit } from '@/sim/entities';
+import type { Effect, Enemy, Floater, FloaterTone, Unit } from '@/sim/entities';
 import type { BattleState } from '@/sim/state';
 import { roundedRect, type CanvasSurface } from './canvas';
 import { PALETTE, font } from './theme';
@@ -11,7 +11,7 @@ const PAD = 10;
 const LANE_GAP = 10;
 const HEADER_H = 20;
 const GATE_H = 46;
-const GATE_GAP = 8;
+const GATE_GAP = 18;
 const CORE_H = 52;
 const CORE_GAP = 10;
 const ROW_GAP = 8;
@@ -20,6 +20,12 @@ const ROW_LABEL: Record<Row, string> = {
   0: '前排 · 先接敌',
   1: '中排',
   2: '后排 · 护核心',
+};
+
+const ROW_LABEL_SHORT: Record<Row, string> = {
+  0: '前排',
+  1: '中排',
+  2: '后排',
 };
 
 const LANE_ACCENT: Record<Lane, string> = {
@@ -143,12 +149,17 @@ export function drawBattlefield(
           enemy.lane === lane.lane && enemy.progress >= row && enemy.progress < row + 1,
       );
       drawSlot(surface, lane, y, row, accent, highlight, action, Boolean(occupied) || enemyInside);
-      if (occupied) drawUnit(surface, lane, y, occupied);
       if (row < ROWS.length - 1) {
         drawChevron(surface, lane.centerX, y + lane.rowHeight + ROW_GAP / 2, 3.4, accent, 0.35);
       }
     }
     drawChevron(surface, lane.centerX, lane.gateBottom + GATE_GAP / 2, 3.4, accent, 0.45);
+
+    for (const unit of state.units) {
+      if (unit.lane !== lane.lane || unit.hp <= 0) continue;
+      const y = lane.rowY[unit.row] ?? 0;
+      drawUnit(surface, lane, y, unit);
+    }
 
     drawCore(surface, lane, accent, intact);
   }
@@ -158,9 +169,14 @@ export function drawBattlefield(
     if (lane) drawEnemy(surface, lane, enemy, state.elapsed);
   }
 
+  drawUnitLinks(surface, layout, state);
+  drawEnemyCombatLinks(surface, layout, state);
+
   for (const effect of state.effects) {
     drawEffect(surface, layout, effect);
   }
+
+  drawFloaters(surface, layout, state.floaters);
 }
 
 /** 选中的牌能否放在这里：'ok' 高亮，'blocked' 变暗，null 不处理。 */
@@ -347,7 +363,7 @@ function drawSlot(
   ctx.textBaseline = 'top';
   ctx.font = font(500, 9);
   ctx.fillStyle = 'rgba(232, 237, 247, 0.42)';
-  ctx.fillText(ROW_LABEL[row], x + 9, y + 8);
+  ctx.fillText(rowHeight < 62 ? ROW_LABEL_SHORT[row] : ROW_LABEL[row], x + 9, y + 8);
 
   if (busy) {
     ctx.restore();
@@ -400,6 +416,232 @@ function drawSlot(
   ctx.restore();
 }
 
+function enemyPixelX(lane: LaneLayout, enemy: Enemy): number {
+  const seed = Number.parseInt(enemy.id.replace('e', ''), 10) || 0;
+  return lane.centerX + ((seed % 3) - 1) * 7;
+}
+
+function findRenderTarget(state: BattleState, unit: Unit): Enemy | null {
+  let best: Enemy | null = null;
+  for (const enemy of state.enemies) {
+    if (enemy.lane !== unit.lane || enemy.hp <= 0) continue;
+    if (enemy.progress < unit.row - unit.range) continue;
+    if (enemy.progress > unit.row + 1) continue;
+    if (!best || enemy.progress > best.progress) best = enemy;
+  }
+  return best;
+}
+
+function findRenderBlocker(state: BattleState, enemy: Enemy): Unit | null {
+  let best: Unit | null = null;
+  for (const unit of state.units) {
+    if (unit.lane !== enemy.lane || unit.hp <= 0) continue;
+    if (unit.row + 0.95 < enemy.progress) continue;
+    if (!best || unit.row < best.row) best = unit;
+  }
+  return best;
+}
+
+function drawArrow(ctx: CanvasRenderingContext2D, from: { x: number; y: number }, to: { x: number; y: number }, color: string, alphaValue: number): void {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  ctx.save();
+  ctx.globalAlpha = alphaValue;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'round';
+  for (const side of [-0.55, 0.55]) {
+    ctx.beginPath();
+    ctx.moveTo(to.x - Math.cos(angle + side) * 5, to.y - Math.sin(angle + side) * 5);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawUnitLinks(surface: CanvasSurface, layout: BattleLayout, state: BattleState): void {
+  for (const unit of state.units) {
+    const lane = layout.lanes[unit.lane];
+    if (!lane) continue;
+    drawUnitLink(surface, lane, lane.rowY[unit.row] ?? 0, unit, state);
+  }
+}
+
+/** 我方和敌人正在交战：青色连线指向被攻击的敌人。 */
+function drawUnitLink(
+  surface: CanvasSurface,
+  lane: LaneLayout,
+  y: number,
+  unit: Unit,
+  state: BattleState,
+): void {
+  const { ctx } = surface;
+  if (unit.hp <= 0 || unit.attack <= 0) return;
+  const target = findRenderTarget(state, unit);
+  if (!target) return;
+
+  // 远程连线走在格子右侧，避免穿过空格中央的「+ / 可部署」。
+  const linkOffset = unit.range >= 2 ? 18 : -4;
+  const from = {
+    x: lane.centerX + linkOffset,
+    y: y + lane.rowHeight * 0.32,
+  };
+  const to = { x: enemyPixelX(lane, target) + linkOffset, y: enemyY(lane, target.progress) - 2 };
+
+  ctx.save();
+  ctx.globalAlpha = 0.75;
+  ctx.strokeStyle = '#8fd3ff';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  ctx.restore();
+  drawArrow(ctx, from, to, '#8fd3ff', 0.6);
+
+    if (unit.attackFlash > 0) {
+      const flash = unit.attackFlash / 0.22;
+      const travel = Math.min(1, 1 - flash + 0.25);
+      const dx = (to.x - from.x) * travel;
+      const dy = (to.y - from.y) * travel;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, flash * 1.6);
+      if (unit.range >= 2) {
+        ctx.fillStyle = '#d8f1ff';
+        ctx.shadowColor = '#8fd3ff';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(from.x + dx, from.y + dy, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = '#fff3c4';
+        ctx.lineWidth = 1.8;
+        for (const spread of [-0.5, 0, 0.5]) {
+          ctx.beginPath();
+          ctx.moveTo(to.x - 3 + spread * 4, to.y - 4);
+          ctx.lineTo(to.x + 3 + spread * 5, to.y + 4);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+}
+
+/** 敌人被阻挡并还手时，用红色连线和抓痕标出攻击对象。 */
+function drawEnemyCombatLinks(surface: CanvasSurface, layout: BattleLayout, state: BattleState): void {
+  const { ctx } = surface;
+  for (const enemy of state.enemies) {
+    const lane = layout.lanes[enemy.lane];
+    if (!lane) continue;
+    const blocker = findRenderBlocker(state, enemy);
+    if (!blocker) continue;
+    const stop = Math.max(0.03, blocker.row - (enemy.range >= 2 ? 0.45 : 0.05));
+    if (enemy.progress < stop - 0.1) continue;
+
+    const from = { x: enemyPixelX(lane, enemy) + 4, y: enemyY(lane, enemy.progress) };
+    const to = {
+      x: lane.centerX + 4,
+      y: (lane.rowY[blocker.row] ?? 0) + lane.rowHeight / 2 - 3,
+    };
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#ff6b6b';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.restore();
+
+    const flash = Math.max(enemy.attackFlash, blocker.attackFlash);
+    if (flash > 0) {
+      const alphaValue = Math.min(1, (flash / 0.22) * 1.5);
+      ctx.save();
+      ctx.globalAlpha = alphaValue;
+      ctx.strokeStyle = enemy.attackFlash > 0 ? '#ff9a9a' : '#9fdcff';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+      for (const spread of [-3, 0, 3]) {
+        ctx.beginPath();
+        ctx.moveTo(to.x + spread - 2, to.y - 5);
+        ctx.lineTo(to.x + spread + 2, to.y + 5);
+        ctx.stroke();
+      }
+      drawSpark(ctx, (from.x + to.x) / 2, (from.y + to.y) / 2, 0.95, '#ffd166');
+      ctx.restore();
+    }
+  }
+}
+
+function drawSpark(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  alphaValue: number,
+  color: string,
+): void {
+  ctx.save();
+  ctx.globalAlpha = alphaValue;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i += 1) {
+    const angle = (Math.PI / 2) * i + Math.PI / 4;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    ctx.beginPath();
+    ctx.moveTo(x + cos * 2, y + sin * 2);
+    ctx.lineTo(x + cos * 6, y + sin * 6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawFloaters(
+  surface: CanvasSurface,
+  layout: BattleLayout,
+  floaters: readonly Floater[],
+): void {
+  const { ctx } = surface;
+  const colors: Record<FloaterTone, string> = {
+    enemyDamage: '#ffd166',
+    unitDamage: '#ff8f8f',
+    status: '#9fdcff',
+    notice: '#ffe7a3',
+  };
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const floater of floaters) {
+    const lane = layout.lanes[floater.lane];
+    if (!lane) continue;
+    const rowY = lane.rowY[floater.row ?? 0] ?? 0;
+    const baseY =
+      floater.progress !== undefined
+        ? Math.max(enemyY(lane, floater.progress) - 4, (lane.rowY[0] ?? 0) + 20)
+        : rowY + lane.rowHeight / 2 - 2;
+    const progress = 1 - floater.ttl / floater.maxTtl;
+    const seed = Number.parseInt(floater.id.replace('f', ''), 10) || 0;
+    const sideOffset =
+      floater.tone === 'unitDamage' ? 24 : floater.tone === 'enemyDamage' ? -24 : 0;
+    const x = lane.centerX + sideOffset + ((seed % 3) - 1) * 5;
+    const rise = floater.tone === 'enemyDamage' ? 14 : 18;
+    const y = Math.max(20, baseY - rise - progress * 14);
+    const big = floater.tone === 'enemyDamage' || floater.tone === 'unitDamage';
+
+    ctx.globalAlpha = Math.min(1, floater.ttl / 0.22);
+    ctx.font = font(big ? 700 : 600, big ? 11 : 9);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(8, 10, 20, 0.88)';
+    ctx.strokeText(floater.text, x, y);
+    ctx.fillStyle = colors[floater.tone];
+    ctx.fillText(floater.text, x, y);
+  }
+  ctx.restore();
+}
+
 function drawUnit(surface: CanvasSurface, lane: LaneLayout, y: number, unit: Unit): void {
   const { ctx } = surface;
   const card = getCard(unit.card);
@@ -417,6 +659,27 @@ function drawUnit(surface: CanvasSurface, lane: LaneLayout, y: number, unit: Uni
   ctx.lineWidth = 1;
   ctx.stroke();
 
+  // 我方阵营标记：青色底座 + 右侧竖条 + 角标，和红色敌人区分。
+  ctx.fillStyle = 'rgba(143, 211, 255, 0.1)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 9, 16, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(143, 211, 255, 0.38)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(143, 211, 255, 0.65)';
+  roundedRect(ctx, lane.x + lane.width - 5, y + 10, 2.5, rowHeight - 20, 1.2);
+  ctx.fill();
+
+  ctx.font = font(600, 7.5);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(143, 211, 255, 0.7)';
+  ctx.fillText('我方', lane.x + lane.width - 9, y + 7);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
   if (unit.stunRemaining > 0) {
     ctx.strokeStyle = 'rgba(255, 209, 102, 0.9)';
     ctx.lineWidth = 1.4;
@@ -425,9 +688,29 @@ function drawUnit(surface: CanvasSurface, lane: LaneLayout, y: number, unit: Uni
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = font(400, rowHeight >= 64 ? 22 : 18);
+  ctx.font = font(400, rowHeight >= 64 ? 22 : rowHeight >= 60 ? 18 : 15);
   ctx.fillStyle = '#fff';
   ctx.fillText(card.emoji, cx, cy - 7);
+
+  if (unit.attackFlash > 0) {
+    ctx.globalAlpha = Math.min(1, (unit.attackFlash / 0.22) * 1.3);
+    ctx.strokeStyle = '#ffe7a3';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 6, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  if (unit.hitFlash > 0) {
+    ctx.globalAlpha = Math.min(1, (unit.hitFlash / 0.16) * 1.2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 6, 16, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
   ctx.font = font(600, 8.5);
   ctx.fillStyle = 'rgba(232, 237, 247, 0.75)';
@@ -467,17 +750,44 @@ function drawEnemy(
   if (y < lane.gateTop - 26 || y > lane.coreTop + 10) return;
 
   // 同路敌人错开一点，避免完全重叠。
-  const seed = Number.parseInt(enemy.id.replace('e', ''), 10) || 0;
-  const x = lane.centerX + ((seed % 3) - 1) * 7;
-  const size = enemy.boss ? 30 : 20;
+  const x = enemyPixelX(lane, enemy);
+  const size = enemy.boss ? 30 : lane.rowHeight < 60 ? 15 : 20;
   const ratio = Math.max(0, enemy.hp / enemy.maxHp);
   ctx.save();
 
-  // 落影
+  // 落影与红色敌方底座
   ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
   ctx.beginPath();
   ctx.ellipse(x, y + 2, size * 0.45, size * 0.18, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.fillStyle = 'rgba(255, 107, 107, 0.14)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 2, size * 0.55, size * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 107, 107, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  if (enemy.attackFlash > 0) {
+    ctx.globalAlpha = Math.min(1, (enemy.attackFlash / 0.22) * 1.3);
+    ctx.strokeStyle = '#ff9a9a';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  if (enemy.hitFlash > 0) {
+    ctx.globalAlpha = Math.min(1, (enemy.hitFlash / 0.16) * 1.2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y - 2, size * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
   if (enemy.slowRemaining > 0) {
     ctx.strokeStyle = 'rgba(143, 211, 255, 0.8)';
@@ -520,6 +830,10 @@ function drawEnemy(
   ctx.fillStyle = ratio > 0.5 ? '#ff8a8a' : ratio > 0.25 ? '#ffd166' : '#ff6b6b';
   roundedRect(ctx, barX, barY, Math.max(1.5, barWidth * ratio), 3, 1.5);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+  ctx.lineWidth = 0.6;
+  roundedRect(ctx, barX, barY, barWidth, 3, 1.5);
+  ctx.stroke();
 
   ctx.restore();
 }

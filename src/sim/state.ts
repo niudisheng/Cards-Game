@@ -2,7 +2,7 @@ import type { Lane, Phase } from '@/core/types';
 import type { SpawnEvent } from '@/data/schema';
 import { buildSpawnQueue } from '@/data/waves';
 import { createEconomy, type EconomyState } from './economy';
-import type { Effect, Enemy, Unit } from './entities';
+import type { Effect, Enemy, Floater, Unit } from './entities';
 
 export type BattleResult = 'victory' | 'defeat';
 
@@ -35,6 +35,8 @@ export interface BattleState {
   spawnCursor: number;
   nextId: number;
   effects: Effect[];
+  /** 战斗飘字；由 sim 生成，渲染层消费。 */
+  floaters: Floater[];
   result: BattleResult | null;
   resultReason: string;
   bossSpawned: boolean;
@@ -61,6 +63,7 @@ export function createBattleState(options: CreateBattleOptions = {}): BattleStat
     spawnCursor: 0,
     nextId: 0,
     effects: [],
+    floaters: [],
     result: null,
     resultReason: '',
     bossSpawned: false,

@@ -268,3 +268,29 @@ describe('法术', () => {
     expect(state.stats.spellsCast).toBe(1);
   });
 });
+
+describe('战斗反馈', () => {
+  it('攻击会记录攻击反馈与伤害飘字', () => {
+    const state = fresh();
+    setMana(state, 10);
+    deploy(state, 'archer', 0, 2);
+    spawnEnemyNow(state, 0, 'grunt', 0.5);
+
+    stepBattle(state, 0.05);
+
+    expect(state.units[0]?.attackFlash).toBeGreaterThan(0);
+    expect(state.floaters.some((f) => f.text === '-12' && f.tone === 'enemyDamage')).toBe(true);
+  });
+
+  it('单位受击会出现红色伤害飘字', () => {
+    const state = fresh();
+    setMana(state, 10);
+    deploy(state, 'shield', 0, 0);
+    const grunt = spawnEnemyNow(state, 0, 'grunt', 0.04);
+
+    stepBattle(state, 0.05);
+
+    expect(grunt.progress).toBeLessThanOrEqual(0.05);
+    expect(state.floaters.some((f) => f.tone === 'unitDamage')).toBe(true);
+  });
+});

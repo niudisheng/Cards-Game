@@ -21,6 +21,9 @@ export interface Unit {
   lifespan: number | null;
   temporary: boolean;
   stunRemaining: number;
+  /** 攻击/受击的短暂表现计时，仅供渲染层使用。 */
+  attackFlash: number;
+  hitFlash: number;
   slowOnHit?: { factor: number; duration: number };
   auraBonus?: number;
   onDeath?: DeathEffect;
@@ -42,6 +45,8 @@ export interface Enemy {
   slowFactor: number;
   slowRemaining: number;
   stunRemaining: number;
+  attackFlash: number;
+  hitFlash: number;
   jumped: boolean;
   skillCooldown: number;
   windupRemaining: number;
@@ -57,6 +62,22 @@ export interface Enemy {
 
 export type EffectKind = 'burst' | 'nova' | 'barrier' | 'spawn';
 
+export type FloaterTone = 'enemyDamage' | 'unitDamage' | 'status' | 'notice';
+
+/** 飘字：伤害数字、减速/眩晕、漏怪等瞬时战斗反馈。 */
+export interface Floater {
+  id: string;
+  lane: Lane;
+  /** 单位/核心位置：行号。 */
+  row?: Row;
+  /** 敌人位置：以格为单位的推进距离。 */
+  progress?: number;
+  text: string;
+  tone: FloaterTone;
+  ttl: number;
+  maxTtl: number;
+}
+
 /** 纯表现效果，sim 只负责倒计时，渲染层决定怎么画。 */
 export interface Effect {
   id: string;
@@ -69,7 +90,7 @@ export interface Effect {
   color: string;
 }
 
-export function nextId(state: BattleState, prefix: 'u' | 'e' | 'fx'): string {
+export function nextId(state: BattleState, prefix: 'u' | 'e' | 'fx' | 'f'): string {
   state.nextId += 1;
   return `${prefix}${state.nextId}`;
 }
@@ -99,6 +120,8 @@ export function createUnit(
     lifespan: options.lifespan ?? stats.lifespan ?? null,
     temporary: options.temporary ?? false,
     stunRemaining: 0,
+    attackFlash: 0,
+    hitFlash: 0,
     slowOnHit: def.kind === 'unit' ? def.slowOnHit : undefined,
     auraBonus: def.kind === 'unit' ? def.aura?.attackSpeedBonus : undefined,
     onDeath: def.kind === 'unit' ? def.onDeath : undefined,
@@ -127,6 +150,8 @@ export function createEnemy(
     slowFactor: 1,
     slowRemaining: 0,
     stunRemaining: 0,
+    attackFlash: 0,
+    hitFlash: 0,
     jumped: false,
     skillCooldown: def.bossSkill?.interval ?? 0,
     windupRemaining: 0,

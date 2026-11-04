@@ -333,11 +333,16 @@
 /* 矮屏（如 375×667）压缩纵向留白，把高度让给战场。 */
 @media (max-height: 720px) {
   .app {
-    gap: 6px;
+    gap: 4px;
+  }
+
+  /* 核心上已经写了屏障状态，矮屏不再重复占一行。 */
+  .barriers {
+    display: none;
   }
 
   .dock {
-    gap: 6px;
+    gap: 4px;
   }
 
   .dock-note {
@@ -354,12 +359,16 @@
   }
 
   .mana {
-    gap: 4px;
-    padding: 6px 10px;
+    gap: 3px;
+    padding: 4px 10px;
+  }
+
+  .mana__track {
+    height: 6px;
   }
 
   .btn {
-    height: 36px;
+    height: 32px;
   }
 }
 
